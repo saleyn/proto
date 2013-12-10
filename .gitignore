@@ -1,3 +1,5 @@
+/ebin
+.svn
 .eunit
 deps
 *.o

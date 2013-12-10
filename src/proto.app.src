@@ -1,0 +1,9 @@
+{application, proto,
+    [{description,"General protocol handling modules"},
+     {vsn, git},
+     {modules,[]},
+     {registered,[]},
+     {applications,[kernel,stdlib]},
+     {env,[]}
+    ]
+}.
