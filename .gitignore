@@ -5,4 +5,6 @@ deps
 *.o
 *.beam
 *.plt
+examples/echo_server.erl
+src/gen_listener_tcp.erl
 erl_crash.dump
