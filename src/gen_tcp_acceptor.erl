@@ -10,8 +10,6 @@
 -module(gen_tcp_acceptor).
 -behaviour(gen_server).
 
--export([behaviour_info/1]).
-
 -export([
     start/3,
     start/4,
@@ -25,7 +23,8 @@
     handle_cast/2,
     handle_info/2,
     terminate/2,
-    code_change/3
+    code_change/3,
+    format_status/2
 ]).
 
 -export([sockname/1]).
@@ -38,19 +37,34 @@
     mod_state
 }).
 
-behaviour_info(callbacks) -> [
-    {init,          1},
-    {handle_accept, 2},
-    {handle_error,  3},
-    {terminate,     2},
-    {code_change,   3}
-].
+-define(TAG, '$gen_tcp_acceptor_mod').
 
--define(TAG, '__gen_listener_tcp_mod').
+%%%-------------------------------------------------------------------
+%%% Interface API
+%%%-------------------------------------------------------------------
+
+-callback init(Args::term()) ->
+    {ok, {Port::integer(), ListenerTcpOptions::list()}, State::term()} |
+    {stop, Reason::term()} |
+    ignore.
+-callback handle_accept(Request::term(), State::term()) ->
+    {noreply, NewState :: term()} |
+    {noreply, NewState :: term(), timeout() | hibernate} |
+    {stop, Reason :: term(), Reply :: term(), NewState :: term()} |
+    {stop, Reason :: term(), NewState :: term()}.
+-callback handle_error(Request::term(), State::term()) ->
+    {noreply, NewState :: term()} |
+    {noreply, NewState :: term(), timeout() | hibernate} |
+    {stop, Reason :: term(), NewState :: term()}.
+-callback terminate(Reason :: (normal | shutdown | {shutdown, term()} | term()),
+                    State :: term()) -> term().
+-callback code_change(OldVsn::(term() | {down,term()}), State::term(), Extra::term()) ->
+    {ok, NewState :: term()} | {error, Reason :: term()}.
 
 %%%-------------------------------------------------------------------
 %%% API
 %%%-------------------------------------------------------------------
+
 start_link(Name, Module, Args, Options) ->
     gen_server:start_link(Name, ?MODULE, add_mod(Module, Args), Options).
 
@@ -165,6 +179,17 @@ code_change(OldVsn, #lstate{mod=Mod, mod_state=ModState}=St, Extra) ->
         {ok, St#lstate{mod_state=NewModState}};
     false ->
         {ok, St}
+    end.
+
+format_status(Opt, [PDict, #lstate{mod=Mod, mod_state=MState} = LS]) ->
+    case erlang:function_exported(Mod, format_status, 2) of
+    true ->
+        Mod:format_status(Opt, [PDict, MState]);
+    false when Opt =:= terminate ->
+        LS;
+    false ->
+        Data = lists:zip(record_info(fields, lstate), tl(tuple_to_list(LS))),
+        [{data, [{"State", Data}]}]
     end.
 
 %%%-------------------------------------------------------------------
