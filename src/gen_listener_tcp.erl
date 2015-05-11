@@ -172,7 +172,7 @@ handle_info({inet_async, LSock, ARef, {ok, CSock}},
         {noreply, NewModState, Timeout} ->
             {noreply, create_acceptor(St#lstate{mod_state=NewModState}), Timeout};
         {stop, Reason, NewModState} ->
-            {stop, Reason, create_acceptor(St#lstate{mod_state=NewModState})}
+            {stop, Reason, St#lstate{mod_state=NewModState}}
         end
     catch
         Type:Err ->
