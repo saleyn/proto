@@ -143,19 +143,24 @@ handle_info({inet_async, LSock, ARef, {ok, CSock}},
 handle_info({inet_async, LS, ARef, Error},
             #lstate{verbose=V, socket=LS, acceptor=ARef, mod=Mod, mod_state=MState}=LState) ->
     error_report(V, [acceptor_error, {reason, Error}, {lsock, LS}, {async_ref, ARef}]),
-    try
-        case Mod:handle_error(Error, MState) of
-        {noreply, NewMState} ->
-            {noreply, create_acceptor(LState#lstate{mod_state=NewMState})};
-        {noreply, NewMState, hibernate} ->
-            {noreply, create_acceptor(LState#lstate{mod_state=NewMState}), hibernate};
-        {noreply, NewMState, Timeout} ->
-            {noreply, create_acceptor(LState#lstate{mod_state=NewMState}), Timeout};
-        {stop, Reason, NewMState} ->
-            {stop, Reason, LState#lstate{mod_state=NewMState}}
-        end
-    catch Type:Err ->
-        error_report(V, [?MODULE, {action, handle_error}, {Type, Err}]),
+    case erlang:function_exported(Mod, terminate, 2) of
+    true ->
+        try
+            case Mod:handle_error(Error, MState) of
+            {noreply, NewMState} ->
+                {noreply, create_acceptor(LState#lstate{mod_state=NewMState})};
+            {noreply, NewMState, hibernate} ->
+                {noreply, create_acceptor(LState#lstate{mod_state=NewMState}), hibernate};
+            {noreply, NewMState, Timeout} ->
+                {noreply, create_acceptor(LState#lstate{mod_state=NewMState}), Timeout};
+            {stop, Reason, NewMState} ->
+                {stop, Reason, LState#lstate{mod_state=NewMState}}
+            end
+        catch Type:Err ->
+            error_report(V, [?MODULE, {action, handle_error}, {Type, Err}]),
+            {stop, Error, LState}
+        end;
+    false ->
         {stop, Error, LState}
     end;
 
