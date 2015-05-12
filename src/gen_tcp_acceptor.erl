@@ -1,9 +1,9 @@
 %%%-------------------------------------------------------------------
 %%% @author Serge Aleynikov <saleyn@gmail.com>
 %%% @copyright (c) 2014 Serge Aleynikov
-%%% @doc Generic TCP socket acceptor. See:
-%%%      [http://www.trapexit.org/index.php/Building_a_Non-blocking_TCP_server_using_OTP_principles]
-%%%
+%%% @doc Generic TCP socket acceptor.
+%%% @see [http://www.trapexit.org/index.php/Building_a_Non-blocking_TCP_server_using_OTP_principles]
+%%% @see [https://github.com/essiene/jsonevents/blob/master/src/gen_listener_tcp.erl]
 %%%-------------------------------------------------------------------
 %%% Created: 2015-05-10
 %%%-------------------------------------------------------------------
@@ -14,7 +14,16 @@
     start/3,
     start/4,
     start_link/3,
-    start_link/4
+    start_link/4,
+    call/2,
+    call/3,
+    multicall/2,
+    multicall/3,
+    multicall/4,
+    cast/2,
+    abcast/2,
+    abcast/3,
+    reply/2
 ]).
 
 -export([
@@ -30,7 +39,7 @@
 -export([sockname/1]).
 
 -record(lstate, {
-    verbose = false :: boolean(),
+    verbose = 0 :: integer(),
     socket,
     acceptor,
     mod,
@@ -47,19 +56,35 @@
     {ok, {Port::integer(), ListenerTcpOptions::list()}, State::term()} |
     {stop, Reason::term()} |
     ignore.
--callback handle_accept(Request::term(), State::term()) ->
+-callback handle_accept(Req::term(), State::term()) ->
     {noreply, NewState :: term()} |
     {noreply, NewState :: term(), timeout() | hibernate} |
     {stop, Reason :: term(), Reply :: term(), NewState :: term()} |
     {stop, Reason :: term(), NewState :: term()}.
--callback handle_error(Request::term(), State::term()) ->
+-callback handle_accept_error(Req::term(), State::term()) ->
     {noreply, NewState :: term()} |
     {noreply, NewState :: term(), timeout() | hibernate} |
     {stop, Reason :: term(), NewState :: term()}.
--callback terminate(Reason :: (normal | shutdown | {shutdown, term()} | term()),
-                    State :: term()) -> term().
+-callback handle_call(Request :: term(), From :: {pid(), Tag :: term()},
+    State :: term()) ->
+    {reply, Reply :: term(), NewState :: term()} |
+    {reply, Reply :: term(), NewState :: term(), timeout() | hibernate} |
+    {noreply, NewState :: term()} |
+    {noreply, NewState :: term(), timeout() | hibernate} |
+    {stop, Reason :: term(), Reply :: term(), NewState :: term()} |
+    {stop, Reason :: term(), NewState :: term()}.
+-callback handle_cast(Request :: term(), State :: term()) ->
+    {noreply, NewState :: term()} |
+    {noreply, NewState :: term(), timeout() | hibernate} |
+    {stop, Reason :: term(), NewState :: term()}.
+-callback handle_info(Info :: timeout | term(), State :: term()) ->
+    {noreply, NewState :: term()} |
+    {noreply, NewState :: term(), timeout() | hibernate} |
+    {stop, Reason :: term(), NewState :: term()}.
 -callback code_change(OldVsn::(term() | {down,term()}), State::term(), Extra::term()) ->
     {ok, NewState :: term()} | {error, Reason :: term()}.
+-callback terminate(Reason :: (normal | shutdown | {shutdown, term()} | term()),
+    State :: term()) -> term().
 
 %%%-------------------------------------------------------------------
 %%% API
@@ -77,6 +102,35 @@ start(Name, Module, Args, Options) ->
 start(Module, Args, Options) ->
     gen_server:start(?MODULE, add_mod(Module, Args), Options).
 
+call(ServerRef, Request) ->
+    gen_server:call(ServerRef, Request).
+
+call(ServerRef, Request, Timeout) ->
+    gen_server:call(ServerRef, Request, Timeout).
+
+multicall(Name, Request) ->
+    gen_server:multi_call(Name, Request).
+
+multicall(Nodes, Name, Request) ->
+    gen_server:multi_call(Nodes, Name, Request).
+
+multicall(Nodes, Name, Request, Timeout) ->
+    gen_server:multi_call(Nodes, Name, Request, Timeout).
+
+cast(ServerRef, Request) ->
+    gen_server:cast(ServerRef, Request).
+
+abcast(Name, Request) ->
+    gen_server:abcast(Name, Request).
+
+abcast(Nodes, Name, Request) ->
+    gen_server:abcast(Nodes, Name, Request).
+
+reply(Client, Reply) ->
+    gen_server:reply(Client, Reply).
+
+-spec sockname(Pid::pid() | atom()) ->
+    {ok, {Addr::tuple(), Port::integer()}} | {error, Reason::term()}.
 sockname(ServerRef) ->
     gen_server:call(ServerRef, {?TAG, sockname}).
 
@@ -85,68 +139,104 @@ sockname(ServerRef) ->
 %%--------------------------------------------------------------------
 
 init([{?TAG, Module} | InitArgs]) ->
-    process_flag(trap_exit, true),
+    %process_flag(trap_exit, true),
+    try
+        case Module:init(InitArgs) of
+        {ok, {Port, Options}, ModState} ->
+            Verbose  = proplists:get_value(verbose, Options, 0),
+            Options0 = proplists:delete(verbose, Options),
 
-    case Module:init(InitArgs) of
-    {ok, {Port, Options}, ModState} ->
-        Verbose  = proplists:get_bool(verbose, Options),
-        Options0 = proplists:delete(verbose, Options),
+            {ok, LSock}    = gen_tcp:listen(Port, Options0),
+            {ok, {Addr,_}} = inet:sockname(LSock),
+            List = [started_listener, {addr, Addr}, {port, Port},
+                   {lsock, LSock} | Options0],
+            info_report(Verbose, 1, List), 
 
-        {ok, LSock} = gen_tcp:listen(Port, Options0),
-
-        List = [started_listener, {port, Port},
-               {lsock, inet:sockname(LSock)} | Options0],
-        info_report(Verbose, List), 
-
-        {ok, create_acceptor(LSock, Module, ModState, Verbose)};
-    ignore ->
-        ignore;
-    {stop, Reason} ->
-        {stop, Reason};
-    Other ->
-        {stop, Other}
+            {ok, create_acceptor(LSock, Module, ModState, Verbose)};
+        ignore ->
+            ignore;
+        {stop, Reason} ->
+            {stop, Reason};
+        Other ->
+            {stop, Other}
+        end
+    catch _:Err ->
+        {stop, {Err, erlang:get_stacktrace()}}
     end.
 
-handle_call({?TAG, sockname}, _From, #lstate{socket=Socket}=St) ->
+handle_call({?TAG, sockname}, _From, #lstate{socket=Socket}=State) ->
     Reply = inet:sockname(Socket),
-    {reply, Reply, St};
-handle_call(Request, _From, State) ->
-    {stop, {unsupported_call, Request}, State}.
+    {reply, Reply, State};
+handle_call(Req, From, #lstate{mod=Mod, mod_state=ModState}=St) ->
+    try
+        case Mod:handle_call(Req, From, ModState) of 
+        {reply, Reply, NewModState} ->
+            {reply, Reply, St#lstate{mod_state=NewModState}};
+        {reply, Reply, NewModState, TimeoutOrHibernate} ->
+            {reply, Reply, St#lstate{mod_state=NewModState}, TimeoutOrHibernate};
+        {noreply, NewModState} ->
+            {noreply, St#lstate{mod_state=NewModState}};
+        {noreply, NewModState, TimeoutOrHibernate} ->
+            {noreply, St#lstate{mod_state=NewModState}, TimeoutOrHibernate};
+        {stop, Reason, NewModState} ->
+            {stop, Reason, St#lstate{mod_state=NewModState}};
+        {stop, Reason, Reply, NewModState} ->
+            {stop, Reason, Reply, St#lstate{mod_state=NewModState}}
+        end
+    catch Type:Err ->
+        error_report(St#lstate.verbose, 1,
+            [?MODULE, {action, handle_call}, {error, Err}, {module, Mod},
+                      {Type, Err}, {stack, erlang:get_stacktrace()}]),
+        {stop, Err, St}
+    end.
 
-handle_cast(Request, #lstate{}=St) ->
-    {stop, {unsupported_cast, Request}, St}.
+handle_cast(Req, #lstate{mod=Mod, mod_state=ModState}=St) ->
+    try
+        case Mod:handle_cast(Req, ModState) of
+        {noreply, NewModState} ->
+            {noreply, St#lstate{mod_state=NewModState}};
+        {noreply, NewModState, TimeoutOrHibernate} ->
+            {noreply, St#lstate{mod_state=NewModState}, TimeoutOrHibernate};
+        {stop, Reason, NewModState} ->
+            {stop, Reason, St#lstate{mod_state=NewModState}}
+        end
+    catch Type:Err ->
+        error_report(St#lstate.verbose, 1,
+            [?MODULE, {action, handle_cast}, {error, Err}, {module, Mod},
+                      {Type, Err}, {stack, erlang:get_stacktrace()}]),
+        {stop, Err, St}
+    end.
 
 handle_info({inet_async, LSock, ARef, {ok, CSock}},
-            #lstate{verbose=V, socket=LSock, acceptor=ARef, mod=Mod, mod_state=ModState}=St) ->
-    info_report(V, [new_connection, {csock, CSock}, {lsock, LSock}, {async_ref, ARef}]),
-    patch_client_socket(CSock, LSock),
-
-    info_report(V, [handling_accept, {module, Mod}, {module_state, ModState}]),
+            #lstate{socket=LSock, acceptor=ARef, mod=Mod, mod_state=ModState}=St) ->
+    info_report(St#lstate.verbose, 2,
+        [new_connection, {csock, CSock}, {lsock, LSock}, {async_ref, ARef},
+                         {module, Mod},  {module_state, ModState}]),
+    register_client_socket(CSock, LSock),
 
     try
         case Mod:handle_accept(CSock, ModState) of
         {noreply, NewModState} ->
             {noreply, create_acceptor(St#lstate{mod_state=NewModState})};
-        {noreply, NewModState, hibernate} ->
-            {noreply, create_acceptor(St#lstate{mod_state=NewModState}), hibernate};
-        {noreply, NewModState, Timeout} ->
-            {noreply, create_acceptor(St#lstate{mod_state=NewModState}), Timeout};
+        {noreply, NewModState, TimeoutOrHibernate} ->
+            {noreply, create_acceptor(St#lstate{mod_state=NewModState}), TimeoutOrHibernate};
         {stop, Reason, NewModState} ->
             {stop, Reason, St#lstate{mod_state=NewModState}}
         end
     catch Type:Err ->
-        error_report(V, [?MODULE, {action, handle_accept}, {Type, Err}]),
+        error_report(St#lstate.verbose, 1,
+            [?MODULE, {action, handle_accept}, {Type, Err},
+                      {stack, erlang:get_stacktrace()}]),
         gen_tcp:close(CSock),
         {noreply, St}
     end;
 
 handle_info({inet_async, LS, ARef, Error},
             #lstate{verbose=V, socket=LS, acceptor=ARef, mod=Mod, mod_state=MState}=LState) ->
-    error_report(V, [acceptor_error, {reason, Error}, {lsock, LS}, {async_ref, ARef}]),
-    case erlang:function_exported(Mod, terminate, 2) of
+    case erlang:function_exported(Mod, handle_accept_error, 2) of
     true ->
         try
-            case Mod:handle_error(Error, MState) of
+            case Mod:handle_accept_error(Error, MState) of
             {noreply, NewMState} ->
                 {noreply, create_acceptor(LState#lstate{mod_state=NewMState})};
             {noreply, NewMState, hibernate} ->
@@ -157,18 +247,36 @@ handle_info({inet_async, LS, ARef, Error},
                 {stop, Reason, LState#lstate{mod_state=NewMState}}
             end
         catch Type:Err ->
-            error_report(V, [?MODULE, {action, handle_error}, {Type, Err}]),
+            error_report(V, 1,
+                [?MODULE, {action, handle_accept_error}, {error, Error}, {module, Mod},
+                          {Type, Err}, {stack, erlang:get_stacktrace()}]),
             {stop, Error, LState}
         end;
     false ->
+        error_report(V, 1,
+            [accept_error, {reason, Error}, {lsock, LS}, {async_ref, ARef}]),
         {stop, Error, LState}
     end;
 
-handle_info(_Info, State) ->
-    {noreply, State}.
+handle_info(Info, #lstate{mod=Mod, mod_state=ModState}=St) ->
+    try
+        case Mod:handle_info(Info, ModState) of
+        {noreply, NewModState} ->
+            {noreply, St#lstate{mod_state=NewModState}};
+        {noreply, NewModState, TimeoutOrHibernate} ->
+            {noreply, St#lstate{mod_state=NewModState}, TimeoutOrHibernate};
+        {stop, Reason, NewModState} ->
+            {stop, Reason, St#lstate{mod_state=NewModState}}
+        end
+    catch Type:Err ->
+        error_report(St#lstate.verbose, 1,
+            [?MODULE, {action, handle_info}, {error, Err}, {module, Mod},
+                      {Type, Err}, {stack, erlang:get_stacktrace()}]),
+        {stop, Err, St}
+    end.
 
 terminate(Reason, #lstate{verbose = V, mod=Mod, mod_state=ModState}=St) ->
-    info_report(V, [listener_terminating, {reason, Reason}]),
+    info_report(V, 1, [listener_terminating, {reason, Reason}]),
     gen_tcp:close(St#lstate.socket),
     case erlang:function_exported(Mod, terminate, 2) of
     true ->
@@ -202,7 +310,7 @@ format_status(Opt, [PDict, #lstate{mod=Mod, mod_state=MState} = LS]) ->
 %%%-------------------------------------------------------------------
 
 % prim_inet imports
-patch_client_socket(CSock, LSock) when is_port(CSock), is_port(LSock) ->
+register_client_socket(CSock, LSock) when is_port(CSock), is_port(LSock) ->
     {ok, Mod}  = inet_db:lookup_socket(LSock),
     true       = inet_db:register_socket(CSock, Mod),
     LOpts      = [active, nodelay, keepalive, delay_send, priority, tos],
@@ -214,19 +322,18 @@ create_acceptor(St) when is_record(St, lstate) ->
 
 create_acceptor(LSock, Mod, ModState, Verbose) when is_port(LSock) ->
     {ok, Ref} = prim_inet:async_accept(LSock, -1), 
+    info_report(Verbose, 2, [waiting_for_connection]),
+    #lstate{verbose=Verbose, socket=LSock, acceptor=Ref, mod=Mod, mod_state=ModState}.
 
-    info_report(Verbose, waiting_for_connection),
-    #lstate{verbose = Verbose, socket=LSock, acceptor=Ref, mod=Mod, mod_state=ModState}.
+info_report(Verbose, Level, Report) when Verbose >= Level ->
+	error_logger:info_report(Report);
+info_report(_, _, _Report) ->
+	ok.
 
-info_report(_Verbose = false, _Report) ->
-	ok;
-info_report(Verbose, Report) when Verbose == true; Verbose == info ->
-	error_logger:info_report(Report).
-
-error_report(_Verbose = false, _Report) ->
-	ok;
-error_report(Verbose, Report) when Verbose == true; Verbose == error ->
-	error_logger:error_report(Report).
+error_report(Verbose, Level, Report) when Verbose >= Level ->
+	error_logger:error_report(Report);
+error_report(_, _, _Report) ->
+	ok.
 
 add_mod(Mod, Args) ->
     [{?TAG, Mod} | Args].
