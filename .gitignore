@@ -1,9 +1,11 @@
 /ebin
 .svn
 .eunit
-deps
+/deps
 *.o
-*.beam
 *.plt
 .rebar
 erl_crash.dump
+certs/*.pem
+certs/index.*
+certs/serial

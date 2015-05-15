@@ -1,20 +1,20 @@
 %%%-------------------------------------------------------------------
 %%% @author Serge Aleynikov <saleyn@gmail.com>
 %%% @copyright (c) 2014 Serge Aleynikov
-%%% @doc Generic TCP socket acceptor.
+%%% @doc Generic TCP/SSL socket acceptor behavior.
 %%% @see [http://www.trapexit.org/index.php/Building_a_Non-blocking_TCP_server_using_OTP_principles]
 %%% @see [https://github.com/essiene/jsonevents/blob/master/src/gen_listener_tcp.erl]
 %%%-------------------------------------------------------------------
 %%% Created: 2015-05-10
 %%%-------------------------------------------------------------------
--module(gen_tcp_acceptor).
+-module(gen_sock_acceptor).
 -behaviour(gen_server).
 
 -export([
-    start/3,
     start/4,
-    start_link/3,
+    start/5,
     start_link/4,
+    start_link/5,
     call/2,
     call/3,
     multicall/2,
@@ -39,8 +39,10 @@
 -export([sockname/1]).
 
 -record(lstate, {
-    verbose = 0::integer(),
-    socket,
+    type    = tcp :: tcp | ssl,
+    verbose = 0   :: integer(),
+    socket        :: (port() | ssl:socket()),
+    lsock         :: port(),
     acceptor,
     mod,
     mod_state,
@@ -49,7 +51,7 @@
     info
 }).
 
--define(TAG, '$gen_tcp_acceptor_mod').
+-define(TAG, '$gen_sock_acceptor_mod').
 
 %%%-------------------------------------------------------------------
 %%% Interface API
@@ -97,17 +99,17 @@
 %%% API
 %%%-------------------------------------------------------------------
 
-start_link(Name, Mod, Args, Options) ->
-    gen_server:start_link(Name, ?MODULE, add_mod(Mod, Args), Options).
+start_link(Name, Type, Mod, Args, Options) when Type=:=tcp; Type=:=ssl ->
+    gen_server:start_link(Name, ?MODULE, add_opts(Type, Mod, Args), Options).
 
-start_link(Mod, Args, Options) ->
-    gen_server:start_link(?MODULE, add_mod(Mod, Args), Options).
+start_link(Type, Mod, Args, Options) when Type=:=tcp; Type=:=ssl ->
+    gen_server:start_link(?MODULE, add_opts(Type, Mod, Args), Options).
 
-start(Name, Mod, Args, Options) ->
-    gen_server:start(Name, ?MODULE, add_mod(Mod, Args), Options).
+start(Name, Type, Mod, Args, Options) when Type=:=tcp; Type=:=ssl ->
+    gen_server:start(Name, ?MODULE, add_opts(Type, Mod, Args), Options).
 
-start(Mod, Args, Options) ->
-    gen_server:start(?MODULE, add_mod(Mod, Args), Options).
+start(Type, Mod, Args, Options) when Type=:=tcp; Type=:=ssl ->
+    gen_server:start(?MODULE, add_opts(Type, Mod, Args), Options).
 
 call(ServerRef, Request) ->
     gen_server:call(ServerRef, Request).
@@ -145,19 +147,19 @@ sockname(ServerRef) ->
 %% gen_server callbacks
 %%--------------------------------------------------------------------
 
-init([{?TAG, Mod} | InitArgs]) ->
+init([{?TAG, Type, Mod, Verbose} | InitArgs]) ->
     process_flag(priority, max),
     %process_flag(trap_exit, true),
     try
         case Mod:init(InitArgs) of
         {ok, {Port, Options}, ModState} ->
-            Verbose  = proplists:get_value(verbose, Options, 0),
-            Options0 = proplists:delete(verbose, Options),
-
-            {ok, LSock}    = gen_tcp:listen(Port, Options0),
-            {ok, {Addr,_}} = inet:sockname(LSock),
-            List = [started_listener, {addr, Addr}, {port, Port},
-                   {lsock, LSock} | Options0],
+            %% We always start with TCP sockets, and if needed upgrade
+            %% them to SSL
+            {ok, LSock}    = socket:listen(Type, Port, Options),
+            {ok, {Addr,_}} = socket:sockname(LSock),
+            LSPort         = socket:extract_port_from_socket(LSock),
+            List = [started_listener, {type, Type},
+                   {addr, Addr}, {port, Port}, {lsock, LSPort} | Options],
             info_report(Verbose, 1, List), 
 
             Call  = erlang:function_exported(Mod, handle_call, 3),
@@ -165,8 +167,8 @@ init([{?TAG, Mod} | InitArgs]) ->
             Info  = erlang:function_exported(Mod, handle_info, 2),
             
             State = #lstate{
-                verbose=Verbose, socket=LSock,
-                mod=Mod, mod_state=ModState,
+                type=Type, verbose=Verbose, socket=LSock, lsock=LSPort,
+                mod=Mod,   mod_state=ModState,
                 call=Call, cast=Cast, info=Info
             },
             {ok, create_acceptor(State)};
@@ -181,8 +183,8 @@ init([{?TAG, Mod} | InitArgs]) ->
         {stop, {Err, erlang:get_stacktrace()}}
     end.
 
-handle_call({?TAG, sockname}, _From, #lstate{socket=Socket}=State) ->
-    Reply = inet:sockname(Socket),
+handle_call({?TAG, sockname}, _From, #lstate{lsock=Sock}=State) ->
+    Reply = inet:sockname(Sock),
     {reply, Reply, State};
 handle_call(Req, _From, #lstate{call=false}=State) ->
     {stop, {not_implemented, Req}, State};
@@ -228,13 +230,13 @@ handle_cast(Req, #lstate{mod=Mod, mod_state=ModState}=St) ->
         {stop, Err, St}
     end.
 
-handle_info({inet_async, LSock, ARef, {ok, CSock}},
+handle_info({inet_async, LSock, ARef, {ok, RawCSock}},
             #lstate{socket=LSock, acceptor=ARef, mod=Mod, mod_state=ModState}=St) ->
     info_report(St#lstate.verbose, 2,
-        [new_connection, {csock, CSock}, {lsock, LSock}, {async_ref, ARef},
-                         {module, Mod},  {module_state, ModState}]),
-    register_client_socket(CSock, LSock),
-
+        fun() -> [new_connection, {csock, socket:extract_port_from_socket(RawCSock)},
+                                  {lsock, St#lstate.lsock}, {async_ref, ARef},
+                                  {module, Mod},  {module_state, ModState}] end),
+    {ok, CSock} = socket:handle_async_accept(LSock, RawCSock),
     try
         case Mod:handle_accept(CSock, ModState) of
         {noreply, NewModState} ->
@@ -248,35 +250,36 @@ handle_info({inet_async, LSock, ARef, {ok, CSock}},
         error_report(St#lstate.verbose, 1,
             [?MODULE, {action, handle_accept}, {Type, Err},
                       {stack, erlang:get_stacktrace()}]),
-        gen_tcp:close(CSock),
+        catch socket:setopts(CSock, [{linger, {false, 0}}]),
+        catch socket:close(CSock),
         {noreply, St}
     end;
 
 handle_info({inet_async, LS, ARef, Error},
-            #lstate{verbose=V, socket=LS, acceptor=ARef, mod=Mod, mod_state=MState}=LState) ->
+            #lstate{verbose=V, socket=LS, acceptor=ARef, mod=Mod, mod_state=MState}=St) ->
     case erlang:function_exported(Mod, handle_accept_error, 2) of
     true ->
         try
             case Mod:handle_accept_error(Error, MState) of
             {noreply, NewMState} ->
-                {noreply, create_acceptor(LState#lstate{mod_state=NewMState})};
+                {noreply, create_acceptor(St#lstate{mod_state=NewMState})};
             {noreply, NewMState, hibernate} ->
-                {noreply, create_acceptor(LState#lstate{mod_state=NewMState}), hibernate};
+                {noreply, create_acceptor(St#lstate{mod_state=NewMState}), hibernate};
             {noreply, NewMState, Timeout} ->
-                {noreply, create_acceptor(LState#lstate{mod_state=NewMState}), Timeout};
+                {noreply, create_acceptor(St#lstate{mod_state=NewMState}), Timeout};
             {stop, Reason, NewMState} ->
-                {stop, Reason, LState#lstate{mod_state=NewMState}}
+                {stop, Reason, St#lstate{mod_state=NewMState}}
             end
         catch Type:Err ->
             error_report(V, 1,
                 [?MODULE, {action, handle_accept_error}, {error, Error}, {module, Mod},
                           {Type, Err}, {stack, erlang:get_stacktrace()}]),
-            {stop, Error, LState}
+            {stop, Error, St}
         end;
     false ->
         error_report(V, 1,
-            [accept_error, {reason, Error}, {lsock, LS}, {async_ref, ARef}]),
-        {stop, Error, LState}
+            [accept_error, {reason, Error}, {lsock, St#lstate.lsock}, {async_ref, ARef}]),
+        {stop, Error, St}
     end;
 
 handle_info(_Info, #lstate{info=false}=St) ->
@@ -300,7 +303,7 @@ handle_info(Info, #lstate{mod=Mod, mod_state=ModState}=St) ->
 
 terminate(Reason, #lstate{verbose = V, mod=Mod, mod_state=ModState}=St) ->
     info_report(V, 1, [listener_terminating, {reason, Reason}]),
-    gen_tcp:close(St#lstate.socket),
+    socket:close(St#lstate.socket),
     erlang:function_exported(Mod, terminate, 2)
         andalso (catch Mod:terminate(Reason, ModState)).
 
@@ -328,28 +331,30 @@ format_status(Opt, [PDict, #lstate{mod=Mod, mod_state=MState} = LS]) ->
 %%% Internal functions
 %%%-------------------------------------------------------------------
 
-% prim_inet imports
-register_client_socket(CSock, LSock) when is_port(CSock), is_port(LSock) ->
-    {ok, Mod}  = inet_db:lookup_socket(LSock),
-    true       = inet_db:register_socket(CSock, Mod),
-    LOpts      = [active, nodelay, keepalive, delay_send, priority, tos],
-    {ok, Opts} = prim_inet:getopts(LSock, LOpts),
-    ok         = prim_inet:setopts(CSock, Opts).
-
-create_acceptor(#lstate{socket=LSock, verbose=Verbose} = St) ->
-    {ok, Ref} = prim_inet:async_accept(LSock, -1), 
-    info_report(Verbose, 2, [waiting_for_connection]),
+create_acceptor(#lstate{lsock=LSock, verbose=Verbose} = St) ->
+    {ok, Ref} = socket:async_accept(LSock),
+    info_report(Verbose, 2, [{waiting_for_connection, St#lstate.lsock}]),
     St#lstate{acceptor=Ref}.
 
 info_report(Verbose, Level, Report) when Verbose >= Level ->
-    error_logger:info_report(Report);
+    if is_function(Report, 0) ->
+        error_logger:info_report(Report());
+    true ->
+        error_logger:info_report(Report)
+    end;
 info_report(_, _, _Report) ->
     ok.
 
 error_report(Verbose, Level, Report) when Verbose >= Level ->
-    error_logger:error_report(Report);
+    if is_function(Report, 0) ->
+        error_logger:error_report(Report());
+    true ->
+        error_logger:error_report(Report)
+    end;
 error_report(_, _, _Report) ->
     ok.
 
-add_mod(Mod, Args) ->
-    [{?TAG, Mod} | Args].
+add_opts(Type, Mod, Args) ->
+    Verbose = proplists:get_value(verbose, Args, 0),
+    Args0   = proplists:delete   (verbose, Args),
+    [{?TAG, Type, Mod, Verbose} | Args0].
