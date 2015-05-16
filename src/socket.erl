@@ -137,7 +137,7 @@ active(Socket, Mode) when (Mode =:= once orelse is_integer(Mode))  ->
 
 format_error(Socket, Error) when is_port(Socket) ->
     inet:format_error(Error);
-format_error(Socket, Error) ->
+format_error(_Socket, Error) ->
     ssl:format_error(Error).
 
 %% @doc {inet_async,...} will be sent to current process when a client connects
