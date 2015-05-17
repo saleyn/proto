@@ -1,12 +1,12 @@
-%%%-------------------------------------------------------------------
+%%%----------------------------------------------------------------------------
 %%% @author Serge Aleynikov <saleyn@gmail.com>
 %%% @copyright (c) 2014 Serge Aleynikov
 %%% @doc Generic TCP/SSL socket acceptor behavior.
 %%% @see [http://www.trapexit.org/index.php/Building_a_Non-blocking_TCP_server_using_OTP_principles]
 %%% @see [https://github.com/essiene/jsonevents/blob/master/src/gen_listener_tcp.erl]
-%%%-------------------------------------------------------------------
+%%%----------------------------------------------------------------------------
 %%% Created: 2015-05-10
-%%%-------------------------------------------------------------------
+%%%----------------------------------------------------------------------------
 -module(gen_sock_acceptor).
 -behaviour(gen_server).
 
@@ -36,7 +36,7 @@
     format_status/2
 ]).
 
--export([sockname/1]).
+-export([sockname/1, filter_ip_address/2]).
 
 -record(lstate, {
     type    = tcp :: tcp | ssl,
@@ -51,11 +51,15 @@
     info
 }).
 
+-ifdef(TEST).
+-include_lib("eunit/include/eunit.hrl").
+-endif.
+
 -define(TAG, '$gen_sock_acceptor_mod').
 
-%%%-------------------------------------------------------------------
+%%%----------------------------------------------------------------------------
 %%% Interface API
-%%%-------------------------------------------------------------------
+%%%----------------------------------------------------------------------------
 
 -callback init(Args::term()) ->
     {ok, {Port::integer(), ListenerTcpOptions::list()}, State::term()} |
@@ -95,9 +99,9 @@
     handle_accept_error/2, hangle_call/3, handle_cast/2, handle_info/2,
     terminate/2, code_change/3, format_status/2]).
 
-%%%-------------------------------------------------------------------
+%%%----------------------------------------------------------------------------
 %%% API
-%%%-------------------------------------------------------------------
+%%%----------------------------------------------------------------------------
 
 start_link(Name, Type, Mod, Args, Options) when Type=:=tcp; Type=:=ssl ->
     gen_server:start_link(Name, ?MODULE, add_opts(Type, Mod, Args), Options).
@@ -143,9 +147,28 @@ reply(Client, Reply) ->
 sockname(ServerRef) ->
     gen_server:call(ServerRef, {?TAG, sockname}).
 
-%%--------------------------------------------------------------------
+%% @doc Given an IP address, return true if it matches to one of the masks
+%%      in the `Whitelist'.
+%% E.g.:
+%% ```
+%%  false = filter_ip_address({127,0,0,1}, []).     %% No match by default
+%%  true  = filter_ip_address({127,0,0,1}, [[]]).   %% Match everything
+%%  true  = filter_ip_address({127,0,0,1}, [[127]]).
+%%  false = filter_ip_address({127,1,2,3}, [[127, 0]]).
+%%  true  = filter_ip_address({127,1,0,3}, [[201,17,10],[127,1]]).
+%% '''
+-spec filter_ip_address(IP::(tuple()|list()), Whitelist::[IP::list()]) -> boolean().
+filter_ip_address(_IP, [] = _IPs) ->
+    false;
+filter_ip_address(IP, [H|T]) when is_tuple(IP) ->
+    L = tuple_to_list(IP),
+    filter_ip_address(L, L, H, T);
+filter_ip_address(IP, [H|T]) when is_list(IP) ->
+    filter_ip_address(IP, IP, H, T).
+
+%%-----------------------------------------------------------------------------
 %% gen_server callbacks
-%%--------------------------------------------------------------------
+%%-----------------------------------------------------------------------------
 
 init([{?TAG, Type, Mod, Verbose} | InitArgs]) ->
     process_flag(priority, max),
@@ -327,9 +350,9 @@ format_status(Opt, [PDict, #lstate{mod=Mod, mod_state=MState} = LS]) ->
         [{data, [{"State", Data}]}]
     end.
 
-%%%-------------------------------------------------------------------
+%%%----------------------------------------------------------------------------
 %%% Internal functions
-%%%-------------------------------------------------------------------
+%%%----------------------------------------------------------------------------
 
 create_acceptor(#lstate{lsock=LSock, verbose=Verbose} = St) ->
     {ok, Ref} = socket:async_accept(LSock),
@@ -358,3 +381,39 @@ add_opts(Type, Mod, Args) ->
     Verbose = proplists:get_value(verbose, Args, 0),
     Args0   = proplists:delete   (verbose, Args),
     [{?TAG, Type, Mod, Verbose} | Args0].
+
+filter_ip_address([] = _IP, _OrigIP, _Mask, _Masks) ->
+    true;
+filter_ip_address(_IP, _OrigIP, [], _) ->
+    true;
+filter_ip_address([_ | _], _OrigIP, [], _Rest) ->
+    true;
+filter_ip_address([_ | _], _OrigIP, [0 | _], _) ->
+    true;
+filter_ip_address([I | T1] =_IP, OrigIP, [I | T2], Rest) ->
+    filter_ip_address(T1, OrigIP,   T2,  Rest);
+filter_ip_address(_IP, OrigIP, _,  [T2 | Rest]) ->
+    filter_ip_address(OrigIP, OrigIP, T2, Rest);
+filter_ip_address(_IP, _OrigIP, _, []) ->
+    false.
+
+%%%----------------------------------------------------------------------------
+%%% Test cases
+%%%----------------------------------------------------------------------------
+
+-ifdef(EUNIT).
+
+filter_ip_address_test() ->
+    ?assertNot(filter_ip_address({127,1,2,3}, [])),
+    ?assert(   filter_ip_address({127,0,0,1}, [[127,0,0,1]])),
+    ?assert(   filter_ip_address({127,1,2,3}, [[127]])),
+    ?assert(   filter_ip_address({127,1,2,3}, [[127,0,0]])),
+    ?assert(   filter_ip_address({127,1,2,3}, [[127,1,2]])),
+    ?assert(   filter_ip_address({127,1,2,3}, [[127,1,2,0]])),
+    ?assert(   filter_ip_address({127,1,2,3}, [[201], [127]])),
+    ?assert(   filter_ip_address({127,1,2,3}, [[]])),
+    ?assert(   filter_ip_address({127,1,2,3}, [[], [123]])),
+    ?assertNot(filter_ip_address({127,1,2,3}, [[201], [255]])),
+    ?assert(   filter_ip_address({127,1,2,3}, [[201,0],[127,1,2]])).
+
+-endif.
