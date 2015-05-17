@@ -256,12 +256,12 @@ handle_cast(Req, #lstate{mod=Mod, mod_state=ModState}=St) ->
     end.
 
 handle_info({inet_async, LSock, ARef, {ok, RawCSock}},
-            #lstate{lsock=LSock, acceptor=ARef, mod=Mod, mod_state=ModState}=St) ->
+            #lstate{lsock=LSock, socket=SSocket, acceptor=ARef, mod=Mod, mod_state=ModState}=St) ->
     info_report(St#lstate.verbose, 2,
         fun() -> [new_connection, {csock, socket:extract_port_from_socket(RawCSock)},
                                   {lsock, St#lstate.lsock}, {async_ref, ARef},
                                   {module, Mod},  {module_state, ModState}] end),
-    {ok, CSock} = socket:handle_async_accept(LSock, RawCSock),
+    {ok, CSock} = socket:handle_async_accept(SSocket, RawCSock),
     try
         case Mod:handle_accept(CSock, ModState) of
         {noreply, NewModState} ->
