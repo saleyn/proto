@@ -103,17 +103,21 @@
 %%% API
 %%%----------------------------------------------------------------------------
 
-start_link(Name, Type, Mod, Args, Options) when Type=:=tcp; Type=:=ssl ->
-    gen_server:start_link(Name, ?MODULE, add_opts(Type, Mod, Args), Options).
+start_link(Name, Type, Mod, ModArgs, GenOptions)
+    when (Type=:=tcp orelse Type=:=ssl), is_atom(Mod), is_list(ModArgs), is_list(GenOptions) ->
+    gen_server:start_link(Name, ?MODULE, add_opts(Type, Mod, ModArgs), GenOptions).
 
-start_link(Type, Mod, Args, Options) when Type=:=tcp; Type=:=ssl ->
-    gen_server:start_link(?MODULE, add_opts(Type, Mod, Args), Options).
+start_link(Type, Mod, ModArgs, GenOptions)
+    when (Type=:=tcp orelse Type=:=ssl), is_atom(Mod), is_list(ModArgs), is_list(GenOptions) ->
+    gen_server:start_link(?MODULE, add_opts(Type, Mod, ModArgs), GenOptions).
 
-start(Name, Type, Mod, Args, Options) when Type=:=tcp; Type=:=ssl ->
-    gen_server:start(Name, ?MODULE, add_opts(Type, Mod, Args), Options).
+start(Name, Type, Mod, ModArgs, GenOptions)
+    when (Type=:=tcp orelse Type=:=ssl), is_atom(Mod), is_list(ModArgs), is_list(GenOptions) ->
+    gen_server:start(Name, ?MODULE, add_opts(Type, Mod, ModArgs), GenOptions).
 
-start(Type, Mod, Args, Options) when Type=:=tcp; Type=:=ssl ->
-    gen_server:start(?MODULE, add_opts(Type, Mod, Args), Options).
+start(Type, Mod, ModArgs, GenOptions)
+    when (Type=:=tcp orelse Type=:=ssl), is_atom(Mod), is_list(ModArgs), is_list(GenOptions) ->
+    gen_server:start(?MODULE, add_opts(Type, Mod, ModArgs), GenOptions).
 
 call(ServerRef, Request) ->
     gen_server:call(ServerRef, Request).
@@ -170,19 +174,19 @@ filter_ip_address(IP, [H|T]) when is_list(IP) ->
 %% gen_server callbacks
 %%-----------------------------------------------------------------------------
 
-init([{?TAG, Type, Mod, Verbose} | InitArgs]) ->
+init([{?TAG, Type, Mod, Verbose} | ModArgs]) ->
     process_flag(priority, max),
     %process_flag(trap_exit, true),
     try
-        case Mod:init(InitArgs) of
-        {ok, {Port, Options}, ModState} ->
+        case Mod:init(ModArgs) of
+        {ok, {Port, ListenOpts}, ModState} when is_integer(Port), is_list(ListenOpts) ->
             %% We always start with TCP sockets, and if needed upgrade
             %% them to SSL
-            {ok, LSock}    = socket:listen(Type, Port, Options),
+            {ok, LSock}    = socket:listen(Type, Port, ListenOpts),
             {ok, {Addr,_}} = socket:sockname(LSock),
             LSPort         = socket:extract_port_from_socket(LSock),
             List = [started_listener, {type, Type},
-                   {addr, Addr}, {port, Port}, {lsock, LSPort} | Options],
+                   {addr, Addr}, {port, Port}, {lsock, LSPort} | ListenOpts],
             info_report(Verbose, 1, List), 
 
             Call  = erlang:function_exported(Mod, handle_call, 3),
@@ -377,10 +381,9 @@ error_report(Verbose, Level, Report) when Verbose >= Level ->
 error_report(_, _, _Report) ->
     ok.
 
-add_opts(Type, Mod, Args) ->
-    Verbose = proplists:get_value(verbose, Args, 0),
-    Args0   = proplists:delete   (verbose, Args),
-    [{?TAG, Type, Mod, Verbose} | Args0].
+add_opts(Type, Mod, ModArgs) ->
+    Verbose = proplists:get_value(debug, ModArgs, 0),
+    [{?TAG, Type, Mod, Verbose} | ModArgs].
 
 filter_ip_address([] = _IP, _OrigIP, _Mask, _Masks) ->
     true;
