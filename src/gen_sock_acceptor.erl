@@ -180,8 +180,6 @@ init([{?TAG, Type, Mod, Verbose} | ModArgs]) ->
     try
         case Mod:init(ModArgs) of
         {ok, {Port, ListenOpts}, ModState} when is_integer(Port), is_list(ListenOpts) ->
-            %% We always start with TCP sockets, and if needed upgrade
-            %% them to SSL
             {ok, LSock}    = socket:listen(Type, Port, ListenOpts),
             {ok, {Addr,_}} = socket:sockname(LSock),
             LSPort         = socket:extract_port_from_socket(LSock),
@@ -258,7 +256,7 @@ handle_cast(Req, #lstate{mod=Mod, mod_state=ModState}=St) ->
     end.
 
 handle_info({inet_async, LSock, ARef, {ok, RawCSock}},
-            #lstate{socket=LSock, acceptor=ARef, mod=Mod, mod_state=ModState}=St) ->
+            #lstate{lsock=LSock, acceptor=ARef, mod=Mod, mod_state=ModState}=St) ->
     info_report(St#lstate.verbose, 2,
         fun() -> [new_connection, {csock, socket:extract_port_from_socket(RawCSock)},
                                   {lsock, St#lstate.lsock}, {async_ref, ARef},
@@ -283,7 +281,7 @@ handle_info({inet_async, LSock, ARef, {ok, RawCSock}},
     end;
 
 handle_info({inet_async, LS, ARef, Error},
-            #lstate{verbose=V, socket=LS, acceptor=ARef, mod=Mod, mod_state=MState}=St) ->
+            #lstate{verbose=V, lsock=LS, acceptor=ARef, mod=Mod, mod_state=MState}=St) ->
     case erlang:function_exported(Mod, handle_accept_error, 2) of
     true ->
         try
