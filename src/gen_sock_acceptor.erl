@@ -183,9 +183,9 @@ init([{?TAG, Type, Mod, Verbose} | ModArgs]) ->
             {ok, LSock}    = socket:listen(Type, Port, ListenOpts),
             {ok, {Addr,_}} = socket:sockname(LSock),
             LSPort         = socket:extract_port_from_socket(LSock),
-            List = [started_listener, {type, Type},
-                   {addr, Addr}, {port, Port}, {lsock, LSPort} | ListenOpts],
-            info_report(Verbose, 1, List), 
+            List = [started_listener, {type, Type}, {addr, Addr}, {port, Port},
+                   {lsock, LSPort},   {verbose, Verbose} | ListenOpts],
+            info_report(Verbose, 0, List),
 
             Call  = erlang:function_exported(Mod, handle_call, 3),
             Cast  = erlang:function_exported(Mod, handle_cast, 2),
@@ -272,12 +272,12 @@ handle_info({inet_async, LSock, ARef, {ok, RawCSock}},
             {stop, Reason, St#lstate{mod_state=NewModState}}
         end
     catch Type:Err ->
-        error_report(St#lstate.verbose, 1,
+        error_report(St#lstate.verbose, 0,
             [?MODULE, {action, handle_accept}, {Type, Err},
                       {stack, erlang:get_stacktrace()}]),
         catch socket:setopts(CSock, [{linger, {false, 0}}]),
         catch socket:close(CSock),
-        {noreply, St}
+        {noreply, create_acceptor(St#lstate{mod_state=St})}
     end;
 
 handle_info({inet_async, LS, ARef, Error},
