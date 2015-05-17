@@ -277,7 +277,7 @@ handle_info({inet_async, LSock, ARef, {ok, RawCSock}},
                       {stack, erlang:get_stacktrace()}]),
         catch socket:setopts(CSock, [{linger, {false, 0}}]),
         catch socket:close(CSock),
-        {noreply, create_acceptor(St#lstate{mod_state=St})}
+        {noreply, create_acceptor(St)}
     end;
 
 handle_info({inet_async, LS, ARef, Error},
