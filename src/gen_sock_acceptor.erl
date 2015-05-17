@@ -341,14 +341,19 @@ code_change(OldVsn, #lstate{mod=Mod, mod_state=ModState}=St, Extra) ->
         {ok, St}
     end.
 
-format_status(Opt, [PDict, #lstate{mod=Mod, mod_state=MState} = LS]) ->
+format_status(Opt, [PDict, #lstate{mod=Mod, lsock=SS, mod_state=MState} = LS]) ->
     case erlang:function_exported(Mod, format_status, 2) of
     true ->
         Mod:format_status(Opt, [PDict, MState]);
-    false when Opt =:= terminate ->
-        LS;
     false ->
-        Data = lists:zip(record_info(fields, lstate), tl(tuple_to_list(LS))),
+        Data = lists:map(
+            fun
+                ({socket, X}) when is_tuple(X) ->
+                    {socket, {ssl_socket,SS}}; %% Display non-verbose SSL socket
+                (Other) ->
+                    Other
+            end,
+            lists:zip(record_info(fields, lstate), tl(tuple_to_list(LS)))),
         [{data, [{"State", Data}]}]
     end.
 
