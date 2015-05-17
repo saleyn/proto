@@ -40,7 +40,7 @@
 -export([send/2, recv/2, recv/3]).
 -export([controlling_process/2]).
 -export([sockname/1, peername/1]).
--export([sockopts/2, format_error/2]).
+-export([setopts/2, format_error/2]).
 -export([close/1, shutdown/2]).
 -export([active/2]).
 -export([async_accept/1]).
@@ -125,10 +125,10 @@ shutdown(Socket, How) when is_port(Socket) ->
 shutdown(Socket, How) ->
 	ssl:shutdown(Socket, How).
 
-sockopts(Socket, Opts) when is_port(Socket) ->
-	inet:sockopts(Socket, Opts);
-sockopts(Socket, Opts) ->
-	ssl:sockopts(Socket, Opts).
+setopts(Socket, Opts) when is_port(Socket) ->
+	inet:setopts(Socket, Opts);
+setopts(Socket, Opts) ->
+	ssl:setopts(Socket, Opts).
 
 active(Socket, Mode) when is_port(Socket) andalso (Mode =:= once orelse is_integer(Mode))  ->
 	inet:setopts(Socket, [{active, Mode}]);
