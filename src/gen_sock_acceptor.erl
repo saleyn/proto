@@ -202,7 +202,7 @@ init([{?TAG, Type, Mod, Verbose} | ModArgs]) ->
         {stop, Reason} ->
             {stop, Reason};
         Other ->
-            {stop, Other}
+            {stop, {unexpected_return, Other}}
         end
     catch _:Err ->
         {stop, {Err, erlang:get_stacktrace()}}
