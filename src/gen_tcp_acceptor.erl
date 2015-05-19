@@ -245,7 +245,7 @@ handle_info({inet_async, LSock, ARef, {ok, CSock}},
             {stop, Reason, St#lstate{mod_state=NewModState}}
         end
     catch Type:Err ->
-        error_report(St#lstate.verbose, 1,
+        error_report(St#lstate.verbose, 0,
             [?MODULE, {action, handle_accept}, {Type, Err},
                       {stack, erlang:get_stacktrace()}]),
         gen_tcp:close(CSock),
@@ -268,13 +268,13 @@ handle_info({inet_async, LS, ARef, Error},
                 {stop, Reason, LState#lstate{mod_state=NewMState}}
             end
         catch Type:Err ->
-            error_report(V, 1,
+            error_report(V, 0,
                 [?MODULE, {action, handle_accept_error}, {error, Error}, {module, Mod},
                           {Type, Err}, {stack, erlang:get_stacktrace()}]),
             {stop, Error, LState}
         end;
     false ->
-        error_report(V, 1,
+        error_report(V, 0,
             [accept_error, {reason, Error}, {lsock, LS}, {async_ref, ARef}]),
         {stop, Error, LState}
     end;

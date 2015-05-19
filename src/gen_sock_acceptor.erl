@@ -230,7 +230,7 @@ handle_call(Req, From, #lstate{mod=Mod, mod_state=ModState}=St) ->
             {stop, Reason, Reply, St#lstate{mod_state=NewModState}}
         end
     catch Type:Err ->
-        error_report(St#lstate.verbose, 1,
+        error_logger:error_report(
             [?MODULE, {action, handle_call}, {error, Err}, {module, Mod},
                       {Type, Err}, {stack, erlang:get_stacktrace()}]),
         {stop, Err, St}
@@ -249,7 +249,7 @@ handle_cast(Req, #lstate{mod=Mod, mod_state=ModState}=St) ->
             {stop, Reason, St#lstate{mod_state=NewModState}}
         end
     catch Type:Err ->
-        error_report(St#lstate.verbose, 1,
+        error_logger:error_report(
             [?MODULE, {action, handle_cast}, {error, Err}, {module, Mod},
                       {Type, Err}, {stack, erlang:get_stacktrace()}]),
         {stop, Err, St}
@@ -272,7 +272,7 @@ handle_info({inet_async, LSock, ARef, {ok, RawCSock}},
             {stop, Reason, St#lstate{mod_state=NewModState}}
         end
     catch Type:Err ->
-        error_report(St#lstate.verbose, 0,
+        error_logger:error_report(
             [?MODULE, {action, handle_accept}, {Type, Err},
                       {stack, erlang:get_stacktrace()}]),
         catch socket:setopts(CSock, [{linger, {false, 0}}]),
@@ -281,7 +281,7 @@ handle_info({inet_async, LSock, ARef, {ok, RawCSock}},
     end;
 
 handle_info({inet_async, LS, ARef, Error},
-            #lstate{verbose=V, lsock=LS, acceptor=ARef, mod=Mod, mod_state=MState}=St) ->
+            #lstate{lsock=LS, acceptor=ARef, mod=Mod, mod_state=MState}=St) ->
     case erlang:function_exported(Mod, handle_accept_error, 2) of
     true ->
         try
@@ -296,13 +296,13 @@ handle_info({inet_async, LS, ARef, Error},
                 {stop, Reason, St#lstate{mod_state=NewMState}}
             end
         catch Type:Err ->
-            error_report(V, 1,
+            error_logger:error_report(
                 [?MODULE, {action, handle_accept_error}, {error, Error}, {module, Mod},
                           {Type, Err}, {stack, erlang:get_stacktrace()}]),
             {stop, Error, St}
         end;
     false ->
-        error_report(V, 1,
+        error_logger:error_report(
             [accept_error, {reason, Error}, {lsock, St#lstate.lsock}, {async_ref, ARef}]),
         {stop, Error, St}
     end;
@@ -320,7 +320,7 @@ handle_info(Info, #lstate{mod=Mod, mod_state=ModState}=St) ->
             {stop, Reason, St#lstate{mod_state=NewModState}}
         end
     catch Type:Err ->
-        error_report(St#lstate.verbose, 1,
+        error_logger:error_report(
             [?MODULE, {action, handle_info}, {error, Err}, {module, Mod},
                       {Type, Err}, {stack, erlang:get_stacktrace()}]),
         {stop, Err, St}
@@ -373,15 +373,6 @@ info_report(Verbose, Level, Report) when Verbose >= Level ->
         error_logger:info_report(Report)
     end;
 info_report(_, _, _Report) ->
-    ok.
-
-error_report(Verbose, Level, Report) when Verbose >= Level ->
-    if is_function(Report, 0) ->
-        error_logger:error_report(Report());
-    true ->
-        error_logger:error_report(Report)
-    end;
-error_report(_, _, _Report) ->
     ok.
 
 add_opts(Type, Mod, ModArgs) ->
