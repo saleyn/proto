@@ -74,8 +74,7 @@
     {noreply, NewState::term()} |
     {noreply, NewState::term(), timeout() | hibernate} |
     {stop, Reason::term(), NewState::term()}.
--callback handle_call(Request::term(), From::{pid(), Tag::term()},
-    State::term()) ->
+-callback handle_call(Request::term(), From::{pid(), Tag::term()}, State::term()) ->
     {reply, Reply::term(), NewState::term()} |
     {reply, Reply::term(), NewState::term(), timeout() | hibernate} |
     {noreply, NewState::term()} |
@@ -94,9 +93,15 @@
     {ok, NewState::term()} | {error, Reason::term()}.
 -callback terminate(Reason::(normal | shutdown | {shutdown, term()} | term()),
     State::term()) -> term().
+-callback format_status(Opt, StatusData) -> Status when
+      Opt :: 'normal' | 'terminate',
+      StatusData :: [PDict | State],
+      PDict :: [{Key :: term(), Value :: term()}],
+      State :: term(),
+      Status :: term().
 
 -optional_callbacks([
-    handle_accept_error/2, hangle_call/3, handle_cast/2, handle_info/2,
+    handle_accept_error/2, handle_call/3, handle_cast/2, handle_info/2,
     terminate/2, code_change/3, format_status/2]).
 
 %%%----------------------------------------------------------------------------
