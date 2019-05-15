@@ -83,9 +83,14 @@ accept(Socket, Timeout) when is_port(Socket) ->
 accept(Socket, Timeout) ->
     case ssl:transport_accept(Socket, Timeout) of
         {ok, NewSocket} ->
-            ssl:ssl_accept(NewSocket),
-            {ok, NewSocket};
-        Error -> Error
+            case ssl:handshake(NewSocket) of
+                {ok, _} ->
+                    {ok, NewSocket};
+                Error ->
+                    Error
+            end;
+        Error ->
+            Error
     end.
 
 send(Socket, Data) when is_port(Socket) ->
@@ -177,7 +182,7 @@ to_ssl_server(Socket, Options, Timeout) when is_port(Socket) ->
     if Active -> inet:setopts(Socket, [{active, false}]);
        true   -> ok
     end,
-    Res = ssl:ssl_accept(Socket, ssl_listen_options(Options), Timeout),
+    Res = ssl:handshake(Socket, ssl_listen_options(Options), Timeout),
     if Active -> inet:setopts(Socket, [{active, true}]);
        true   -> ok
     end,
@@ -275,7 +280,7 @@ extract_port_from_socket({sslsocket,_,{SSLPort,_}}) ->
 extract_port_from_socket(Socket) ->
     Socket.
 
--spec(set_sockopt/2 :: (ListSock :: port(), CliSocket :: port()) -> 'ok' | any()).
+-spec(set_sockopt(ListSock :: port(), CliSocket :: port()) -> 'ok' | any()).
 set_sockopt(ListenObject, ClientSocket) ->
     ListenSocket = extract_port_from_socket(ListenObject),
     true = inet_db:register_socket(ClientSocket, inet_tcp),
