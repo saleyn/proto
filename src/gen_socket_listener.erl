@@ -18,6 +18,8 @@
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2,
          code_change/3]).
 
+-include_lib("kernel/include/logger.hrl").
+
 -record(state, {
                 listener,       % Listening socket
                 acceptor,       % Asynchronous acceptor's internal reference
@@ -190,13 +192,13 @@ handle_info({inet_async, ListSock, Ref, {ok, CliSocket}},
             {ok, NewRef} = prim_inet:async_accept(ListSock, -1),
             {noreply, State#state{acceptor=NewRef}};
         {error, Reason} ->
-            error_logger:error_msg("Error setting socket options: ~p.\n", [Reason]),
+            ?LOG_ERROR("Error setting socket options: ~p.\n", [Reason]),
             {stop, Reason, State}
     end;
 
 handle_info({inet_async, ListSock, Ref, Error},
             #state{listener=ListSock, acceptor=Ref} = State) ->
-    error_logger:error_msg("Error in socket acceptor: ~p.\n", [Error]),
+    ?LOG_ERROR("Error in socket acceptor: ~p.\n", [Error]),
     {stop, Error, State};
 
 handle_info(_Info, State) ->

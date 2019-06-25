@@ -51,6 +51,8 @@
     info
 }).
 
+-include_lib("kernel/include/logger.hrl").
+
 -ifdef(TEST).
 -include_lib("eunit/include/eunit.hrl").
 -endif.
@@ -235,7 +237,7 @@ handle_call(Req, From, #lstate{mod=Mod, mod_state=ModState}=St) ->
             {stop, Reason, Reply, St#lstate{mod_state=NewModState}}
         end
     catch Type:Err:STrace ->
-        error_logger:error_report(
+        ?LOG_ERROR(
             [?MODULE, {action, handle_call}, {error, Err}, {module, Mod},
                       {Type, Err}, {stack, STrace}]),
         {stop, Err, St}
@@ -254,7 +256,7 @@ handle_cast(Req, #lstate{mod=Mod, mod_state=ModState}=St) ->
             {stop, Reason, St#lstate{mod_state=NewModState}}
         end
     catch Type:Err:STrace ->
-        error_logger:error_report(
+        ?LOG_ERROR(
             [?MODULE, {action, handle_cast}, {error, Err}, {module, Mod},
                       {Type, Err}, {stack, STrace}]),
         {stop, Err, St}
@@ -277,7 +279,7 @@ handle_info({inet_async, LSock, ARef, {ok, RawCSock}},
             {stop, Reason, St#lstate{mod_state=NewModState}}
         end
     catch Type:Err:STrace ->
-        error_logger:error_report(
+        ?LOG_ERROR(
             [?MODULE, {action, handle_accept}, {Type, Err},
                       {stack, STrace}]),
         catch socket:setopts(CSock, [{linger, {false, 0}}]),
@@ -301,13 +303,13 @@ handle_info({inet_async, LS, ARef, Error},
                 {stop, Reason, St#lstate{mod_state=NewMState}}
             end
         catch Type:Err:STrace ->
-            error_logger:error_report(
+            ?LOG_ERROR(
                 [?MODULE, {action, handle_accept_error}, {error, Error}, {module, Mod},
                           {Type, Err}, {stack, STrace}]),
             {stop, Error, St}
         end;
     false ->
-        error_logger:error_report(
+        ?LOG_ERROR(
             [accept_error, {reason, Error}, {lsock, St#lstate.lsock}, {async_ref, ARef}]),
         {stop, Error, St}
     end;
@@ -325,7 +327,7 @@ handle_info(Info, #lstate{mod=Mod, mod_state=ModState}=St) ->
             {stop, Reason, St#lstate{mod_state=NewModState}}
         end
     catch Type:Err:STrace ->
-        error_logger:error_report(
+        ?LOG_ERROR(
             [?MODULE, {action, handle_info}, {error, Err}, {module, Mod},
                       {Type, Err}, {stack, STrace}]),
         {stop, Err, St}
@@ -373,9 +375,9 @@ create_acceptor(#lstate{lsock=LSock, verbose=Verbose} = St) ->
 
 info_report(Verbose, Level, Report) when Verbose >= Level ->
     if is_function(Report, 0) ->
-        error_logger:info_report(Report());
+        ?LOG_INFO(Report());
     true ->
-        error_logger:info_report(Report)
+        ?LOG_INFO(Report)
     end;
 info_report(_, _, _Report) ->
     ok.

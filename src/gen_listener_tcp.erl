@@ -50,6 +50,8 @@ behaviour_info(callbacks) -> [
     {code_change,   3}
 ].
 
+-include_lib("kernel/include/logger.hrl").
+
 -define(TAG, '__gen_listener_tcp_mod').
 
 start_link(Name, Module, Args, Options) ->
@@ -228,12 +230,12 @@ create_acceptor(LSock, Mod, ModState, Verbose) when is_port(LSock) ->
 info_report(_Verbose = false, _Report) ->
 	ok;
 info_report(Verbose, Report) when Verbose == true; Verbose == info ->
-	error_logger:info_report(Report).
+	?LOG_INFO(Report).
 
 error_report(_Verbose = false, _Report) ->
 	ok;
 error_report(Verbose, Report) when Verbose == true; Verbose == error ->
-	error_logger:error_report(Report).
+	?LOG_ERROR(Report).
 
 add_mod(Mod, Args) ->
     [{?TAG, Mod} | Args].

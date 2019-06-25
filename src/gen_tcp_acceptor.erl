@@ -49,6 +49,8 @@
     info
 }).
 
+-include_lib("kernel/include/logger.hrl").
+
 -define(TAG, '$gen_tcp_acceptor_mod').
 
 %%%-------------------------------------------------------------------
@@ -347,12 +349,12 @@ create_acceptor(#lstate{socket=LSock, verbose=Verbose} = St) ->
     St#lstate{acceptor=Ref}.
 
 info_report(Verbose, Level, Report) when Verbose >= Level ->
-    error_logger:info_report(Report);
+    ?LOG_INFO(Report);
 info_report(_, _, _Report) ->
     ok.
 
 error_report(Verbose, Level, Report) when Verbose >= Level ->
-    error_logger:error_report(Report);
+    ?LOG_ERROR(Report);
 error_report(_, _, _Report) ->
     ok.
 
