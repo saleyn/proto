@@ -187,9 +187,9 @@ init([{?TAG, Type, Mod, Verbose} | ModArgs]) ->
     try
         case Mod:init(ModArgs) of
         {ok, {Port, ListenOpts}, ModState} when is_integer(Port), is_list(ListenOpts) ->
-            {ok, LSock}    = socket:listen(Type, Port, ListenOpts),
-            {ok, {Addr,_}} = socket:sockname(LSock),
-            LSPort         = socket:extract_port_from_socket(LSock),
+            {ok, LSock}    = sock:listen(Type, Port, ListenOpts),
+            {ok, {Addr,_}} = sock:sockname(LSock),
+            LSPort         = sock:extract_port_from_socket(LSock),
             List = [started_listener, {type, Type}, {addr, Addr}, {port, Port},
                    {lsock, LSPort},   {verbose, Verbose} | ListenOpts],
             info_report(Verbose, 0, List),
@@ -265,10 +265,10 @@ handle_cast(Req, #lstate{mod=Mod, mod_state=ModState}=St) ->
 handle_info({inet_async, LSock, ARef, {ok, RawCSock}},
             #lstate{lsock=LSock, socket=SSocket, acceptor=ARef, mod=Mod, mod_state=ModState}=St) ->
     info_report(St#lstate.verbose, 2,
-        fun() -> [new_connection, {csock, socket:extract_port_from_socket(RawCSock)},
+        fun() -> [new_connection, {csock, sock:extract_port_from_socket(RawCSock)},
                                   {lsock, St#lstate.lsock}, {async_ref, ARef},
                                   {module, Mod},  {module_state, ModState}] end),
-    {ok, CSock} = socket:handle_async_accept(SSocket, RawCSock),
+    {ok, CSock} = sock:handle_async_accept(SSocket, RawCSock),
     try
         case Mod:handle_accept(CSock, ModState) of
         {noreply, NewModState} ->
@@ -282,8 +282,8 @@ handle_info({inet_async, LSock, ARef, {ok, RawCSock}},
         ?LOG_ERROR(
             [?MODULE, {action, handle_accept}, {Type, Err},
                       {stack, STrace}]),
-        catch socket:setopts(CSock, [{linger, {false, 0}}]),
-        catch socket:close(CSock),
+        catch sock:setopts(CSock, [{linger, {false, 0}}]),
+        catch sock:close(CSock),
         {noreply, create_acceptor(St)}
     end;
 
@@ -335,7 +335,7 @@ handle_info(Info, #lstate{mod=Mod, mod_state=ModState}=St) ->
 
 terminate(Reason, #lstate{verbose = V, mod=Mod, mod_state=ModState}=St) ->
     info_report(V, 1, [listener_terminating, {reason, Reason}]),
-    socket:close(St#lstate.socket),
+    sock:close(St#lstate.socket),
     erlang:function_exported(Mod, terminate, 2)
         andalso (catch Mod:terminate(Reason, ModState)).
 
@@ -369,7 +369,7 @@ format_status(Opt, [PDict, #lstate{mod=Mod, lsock=SS, mod_state=MState} = LS]) -
 %%%----------------------------------------------------------------------------
 
 create_acceptor(#lstate{lsock=LSock, verbose=Verbose} = St) ->
-    {ok, Ref} = socket:async_accept(LSock),
+    {ok, Ref} = sock:async_accept(LSock),
     info_report(Verbose, 2, [{waiting_for_connection, St#lstate.lsock}]),
     St#lstate{acceptor=Ref}.
 
