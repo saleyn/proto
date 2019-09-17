@@ -190,7 +190,7 @@ init([{?TAG, Type, Mod, Verbose} | ModArgs]) ->
             {ok, LSock}    = sock:listen(Type, Port, ListenOpts),
             {ok, {Addr,_}} = sock:sockname(LSock),
             LSPort         = sock:extract_port_from_socket(LSock),
-            List = [started_listener, {type, Type}, {addr, Addr}, {port, Port},
+            List = [{info, started_listener}, {type, Type}, {addr, Addr}, {port, Port},
                    {lsock, LSPort},   {verbose, Verbose} | ListenOpts],
             info_report(Verbose, 0, List),
 
@@ -238,8 +238,8 @@ handle_call(Req, From, #lstate{mod=Mod, mod_state=ModState}=St) ->
         end
     catch Type:Err:STrace ->
         ?LOG_ERROR(
-            [?MODULE, {action, handle_call}, {error, Err}, {module, Mod},
-                      {Type, Err}, {stack, STrace}]),
+            [{action, handle_call}, {error, Err}, {module, Mod},
+             {Type, Err}, {stack, STrace}]),
         {stop, Err, St}
     end.
 
@@ -265,9 +265,10 @@ handle_cast(Req, #lstate{mod=Mod, mod_state=ModState}=St) ->
 handle_info({inet_async, LSock, ARef, {ok, RawCSock}},
             #lstate{lsock=LSock, socket=SSocket, acceptor=ARef, mod=Mod, mod_state=ModState}=St) ->
     info_report(St#lstate.verbose, 2,
-        fun() -> [new_connection, {csock, sock:extract_port_from_socket(RawCSock)},
-                                  {lsock, St#lstate.lsock}, {async_ref, ARef},
-                                  {module, Mod},  {module_state, ModState}] end),
+        fun() -> [{info, new_connection},
+                  {csock, sock:extract_port_from_socket(RawCSock)},
+                  {lsock, St#lstate.lsock}, {async_ref, ARef},
+                  {module, Mod},  {module_state, ModState}] end),
     {ok, CSock} = sock:handle_async_accept(SSocket, RawCSock),
     try
         case Mod:handle_accept(CSock, ModState) of
@@ -279,11 +280,9 @@ handle_info({inet_async, LSock, ARef, {ok, RawCSock}},
             {stop, Reason, St#lstate{mod_state=NewModState}}
         end
     catch Type:Err:STrace ->
-        ?LOG_ERROR(
-            [?MODULE, {action, handle_accept}, {Type, Err},
-                      {stack, STrace}]),
+        ?LOG_ERROR([{action, handle_accept}, {Type, Err}, {stack, STrace}]),
         catch sock:setopts(CSock, [{linger, {false, 0}}]),
-        catch sock:close(CSock),
+        sock:close(CSock),
         {noreply, create_acceptor(St)}
     end;
 
@@ -303,14 +302,13 @@ handle_info({inet_async, LS, ARef, Error},
                 {stop, Reason, St#lstate{mod_state=NewMState}}
             end
         catch Type:Err:STrace ->
-            ?LOG_ERROR(
-                [?MODULE, {action, handle_accept_error}, {error, Error}, {module, Mod},
-                          {Type, Err}, {stack, STrace}]),
+            ?LOG_ERROR([{action, handle_accept_error}, {error, Error}, {module, Mod},
+                        {Type, Err}, {stack, STrace}]),
             {stop, Error, St}
         end;
     false ->
-        ?LOG_ERROR(
-            [accept_error, {reason, Error}, {lsock, St#lstate.lsock}, {async_ref, ARef}]),
+        ?LOG_ERROR([{action, accept_error},   {reason, Error},
+                    {lsock, St#lstate.lsock}, {async_ref, ARef}]),
         {stop, Error, St}
     end;
 
@@ -328,13 +326,13 @@ handle_info(Info, #lstate{mod=Mod, mod_state=ModState}=St) ->
         end
     catch Type:Err:STrace ->
         ?LOG_ERROR(
-            [?MODULE, {action, handle_info}, {error, Err}, {module, Mod},
-                      {Type, Err}, {stack, STrace}]),
+            [{action, handle_info}, {error, Err}, {module, Mod},
+             {Type, Err}, {stack, STrace}]),
         {stop, Err, St}
     end.
 
 terminate(Reason, #lstate{verbose = V, mod=Mod, mod_state=ModState}=St) ->
-    info_report(V, 1, [listener_terminating, {reason, Reason}]),
+    info_report(V, 1, [{info, listener_terminating}, {reason, Reason}]),
     sock:close(St#lstate.socket),
     erlang:function_exported(Mod, terminate, 2)
         andalso (catch Mod:terminate(Reason, ModState)).

@@ -121,9 +121,9 @@ sockname(Socket) ->
     ssl:sockname(Socket).
 
 close(Socket) when is_port(Socket) ->
-    gen_tcp:close(Socket);
+    catch gen_tcp:close(Socket);
 close(Socket) ->
-    ssl:close(Socket).
+    catch ssl:close(Socket).
 
 shutdown(Socket, How) when is_port(Socket) ->
     gen_tcp:shutdown(Socket, How);
@@ -207,7 +207,8 @@ type(_Socket) ->
 %%% Internal functions (OS_Mon configuration)
 %%%-----------------------------------------------------------------
 -define(FULLNAME(F),
-    filename:join(filename:dirname(filename:dirname(code:which(?MODULE))), F)).
+    filename:join(filename:dirname(filename:dirname(code:which(?MODULE))),
+                  "priv/certs/"++F)).
 
 def_tcp_listen_opts() ->
     #{active    => false,
@@ -221,15 +222,15 @@ def_tcp_conn_opts() ->
       packet    => line}.
       
 def_ssl_listen_opts() ->
-    (def_tcp_listen_opts())#{certfile  => ?FULLNAME("certs/server/cert.pem"),
+    (def_tcp_listen_opts())#{certfile  => ?FULLNAME("server/cert.pem"),
                              depth     => 0,
-                             keyfile   => ?FULLNAME("certs/server/key.pem"),
+                             keyfile   => ?FULLNAME("server/key.pem"),
                              reuse_sessions => false,
                              ssl_imp   => new}.
 def_ssl_conn_opts() ->
-    (def_tcp_conn_opts())#{  certfile  => ?FULLNAME("certs/client/cert.pem"),
+    (def_tcp_conn_opts())#{  certfile  => ?FULLNAME("client/cert.pem"),
                              depth     => 0,
-                             keyfile   => ?FULLNAME("certs/client/key.pem"),
+                             keyfile   => ?FULLNAME("client/key.pem"),
                              ssl_imp   => new}.
 
 
